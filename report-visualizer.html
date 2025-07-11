@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>x/crypto FIPS Compliance Report Visualizer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2em; background: #f7f7f7; }
+    h1 { color: #2c3e50; }
+    #drop-zone {
+      border: 2px dashed #3498db;
+      background: #ecf0f1;
+      padding: 2em;
+      text-align: center;
+      color: #2980b9;
+      margin-bottom: 2em;
+      cursor: pointer;
+    }
+    .group {
+      margin-bottom: 2em;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+      padding: 1em;
+    }
+    .fips-status {
+      font-weight: bold;
+      padding: 0.2em 0.6em;
+      border-radius: 4px;
+      margin-right: 1em;
+    }
+    .approved { background: #27ae60; color: #fff; }
+    .unapproved { background: #e74c3c; color: #fff; }
+    .must_evaluate_manually { background: #ac12f3; color: #fff; }
+    .unknown { background: #f1c40f; color: #fff; }
+    .module {
+      font-size: 1.1em;
+      color: #34495e;
+      margin-bottom: 0.5em;
+    }
+    ul { margin: 0.5em 0 0 1em; }
+    li { margin-bottom: 0.3em; }
+  </style>
+</head>
+<body>
+  <h1>x/crypto FIPS Compliance Report Visualizer</h1>
+  <div id="drop-zone">Drop your report JSON file here</div>
+  <div id="visualization"></div>
+  <script>
+    const dropZone = document.getElementById('drop-zone');
+    const viz = document.getElementById('visualization');
+
+    dropZone.addEventListener('dragover', e => {
+      e.preventDefault();
+      dropZone.style.background = '#d6eaf8';
+    });
+    dropZone.addEventListener('dragleave', e => {
+      dropZone.style.background = '#ecf0f1';
+    });
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.style.background = '#ecf0f1';
+      const file = e.dataTransfer.files[0];
+      if (file && file.type.match('json')) {
+        const reader = new FileReader();
+        reader.onload = function(evt) {
+          try {
+            const data = JSON.parse(evt.target.result);
+            visualizeReport(data);
+            dropZone.style.display = 'none';
+            const fileNameDiv = document.createElement('div');
+            fileNameDiv.id = 'file-name';
+            fileNameDiv.style = 'margin-bottom:2em;font-weight:bold;color:#2980b9;';
+            fileNameDiv.textContent = `Loaded file: ${file.name}`;
+            dropZone.parentNode.insertBefore(fileNameDiv, viz);
+          } catch (err) {
+            viz.innerHTML = '<div style="color:red">Invalid JSON file.</div>';
+          }
+        };
+        reader.readAsText(file);
+      } else {
+        viz.innerHTML = '<div style="color:red">Please drop a valid JSON file.</div>';
+      }
+    });
+
+    function visualizeReport(data) {
+      // Group usages by FIPS status and crypto module
+      if (!data.detected_usages || !Array.isArray(data.detected_usages)) {
+        viz.innerHTML = '<div style="color:red">No detected_usages found in report.</div>';
+        return;
+      }
+      const groups = {};
+      data.detected_usages.forEach(d => {
+        const status = d.fips_compliant || 'unknown';
+        const module = d.package || 'unknown';
+        if (!groups[status]) groups[status] = {};
+        if (!groups[status][module]) groups[status][module] = [];
+        groups[status][module].push(d);
+      });
+      let html = '';
+      Object.entries(groups).forEach(([status, modules]) => {
+        let statusClass;
+        if (status === 'approved') statusClass = 'approved';
+        else if (status === 'rejected') statusClass = 'unapproved';
+        else if (status === 'must_evaluate_manually') statusClass = 'must_evaluate_manually';
+        else statusClass = 'unknown';
+        html += `<div class=\"group\"><span class=\"fips-status ${statusClass}\">${status.toUpperCase()}</span>`;
+        Object.entries(modules).forEach(([module, usages], idx) => {
+          const moduleId = `module-${status}-${idx}`;
+          html += `<div class=\"module\" style=\"cursor:pointer;\" onclick=\"toggleModule('${moduleId}')\">▶ Module: <b>${module}</b></div>`;
+          html += `<div id=\"${moduleId}\" class=\"module-content\" style=\"display:none;\"><ul>`;
+          usages.forEach(d => {
+            html += `<li><b>${d.function}</b> called by <b>${d.caller_function}</b> <span style=\"color:#888\">(${d.call_site}, ${d.package_path})</span></li>`;
+          });
+          html += '</ul></div>';
+        });
+        html += '</div>';
+      });
+      viz.innerHTML = html;
+    }
+
+    // Collapsing stuff
+    window.toggleModule = function(id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (el.style.display === 'none') {
+        el.style.display = 'block';
+        el.previousElementSibling.innerHTML = el.previousElementSibling.innerHTML.replace('▶', '▼');
+      } else {
+        el.style.display = 'none';
+        el.previousElementSibling.innerHTML = el.previousElementSibling.innerHTML.replace('▼', '▶');
+      }
+    }
+  </script>
+</body>
+</html>
