@@ -1,4 +1,4 @@
-module jacobsee.com/fips-analyzer
+module github.com/jacobsee/fips-analyzer
 
 go 1.24.3
 
