@@ -16,11 +16,13 @@ func main() {
 		verbose        = flag.Bool("verbose", false, "Enable verbose output")
 		unapprovedOnly = flag.Bool("unapproved-only", false, "Show only unapproved usages")
 		denoise        = flag.Bool("denoise", false, "Attempt to filter out calls made by runtime or standard library packages, or within internal crypto packages")
+		callTree       = flag.Bool("call-tree", false, "Include call tree in output (significant increase in computation time)")
+		callTreeDepth  = flag.Int("call-tree-depth", 5, "Maximum depth for call tree analysis (default: 5, lower values improve performance)")
 	)
 	flag.Parse()
 
 	if *sourceDir == "" {
-		fmt.Fprintf(os.Stderr, "Usage: %s -source <directory> [-entry <package>] [-output <file>] [-verbose] [-unapproved-only] [-denoise]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s -source <directory> [-entry <package>] [-output <file>] [-verbose] [-unapproved-only] [-denoise] [-call-tree] [-call-tree-depth <int>]\n", os.Args[0])
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
@@ -31,6 +33,8 @@ func main() {
 		Verbose:        *verbose,
 		UnapprovedOnly: *unapprovedOnly,
 		Denoise:        *denoise,
+		CallTree:       *callTree,
+		CallTreeDepth:  *callTreeDepth,
 	}
 
 	result, err := analyzer.Analyze()
@@ -147,7 +151,7 @@ func printResults(result *AnalysisResult, verbose bool) {
 	}
 }
 
-func printUsage(usage CryptoUsage, verbose bool) {
+func printUsage(usage CryptoUsage) {
 	fmt.Printf(" >> Package: %s\n", usage.Package)
 	fmt.Printf("    Function: %s\n", usage.Function)
 	fmt.Printf("    Called by: %s\n", usage.CallerFunc)

@@ -39,7 +39,29 @@
       margin-bottom: 0.5em;
     }
     ul { margin: 0.5em 0 0 1em; }
-    li { margin-bottom: 0.3em; }
+    li { margin-bottom: 0.5em; }
+    .call-tree {
+      margin-top: 0.5em;
+      padding: 0.5em;
+      background: #f8f9fa;
+      border-left: 3px solid #3498db;
+      border-radius: 3px;
+      font-size: 0.9em;
+    }
+    .call-tree-header {
+      font-weight: bold;
+      color: #2c3e50;
+      margin-bottom: 0.3em;
+    }
+    .call-path {
+      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+      color: #555;
+      line-height: 1.4;
+    }
+    .call-arrow {
+      color: #3498db;
+      margin: 0 0.5em;
+    }
   </style>
 </head>
 <body>
@@ -107,10 +129,27 @@
         html += `<div class=\"group\"><span class=\"fips-status ${statusClass}\">${status.toUpperCase()}</span>`;
         Object.entries(modules).forEach(([module, usages], idx) => {
           const moduleId = `module-${status}-${idx}`;
-          html += `<div class=\"module\" style=\"cursor:pointer;\" onclick=\"toggleModule('${moduleId}')\">▶ Module: <b>${module}</b></div>`;
+          html += `<div class=\"module\" style=\"cursor:pointer;\" onclick=\"toggleModule('${moduleId}')\">▶ Module: <b>${module}</b> (${usages.length} usage${usages.length !== 1 ? 's' : ''})</div>`;
           html += `<div id=\"${moduleId}\" class=\"module-content\" style=\"display:none;\"><ul>`;
           usages.forEach(d => {
-            html += `<li><b>${d.function}</b> called by <b>${d.caller_function}</b> <span style=\"color:#888\">(${d.call_site}, ${d.package_path})</span></li>`;
+            html += `<li><b>${d.function}</b> called by <b>${d.caller_function}</b> <span style=\"color:#888\">(${d.call_site}, ${d.package_path})</span>`;
+            
+            if (d.call_tree && Array.isArray(d.call_tree) && d.call_tree.length > 0) {
+              html += `<div class=\"call-tree\">`;
+              html += `<div class=\"call-tree-header\">Call Path (${d.call_tree.length} step${d.call_tree.length !== 1 ? 's' : ''}):</div>`;
+              html += `<div class=\"call-path\">`;
+              
+              d.call_tree.forEach((node, index) => {
+                if (index > 0) {
+                  html += `<span class=\"call-arrow\">→</span>`;
+                }
+                html += `<span title=\"Package: ${node.package_path}\">${node.function}</span>`;
+              });
+              
+              html += `</div></div>`;
+            }
+            
+            html += `</li>`;
           });
           html += '</ul></div>';
         });

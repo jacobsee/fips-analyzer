@@ -17,6 +17,9 @@ type CryptoAnalyzer struct {
 	Verbose        bool
 	UnapprovedOnly bool
 	Denoise        bool
+	CallTree       bool
+	CallTreeDepth  int
+	pathCache map[*callgraph.Node][]CallNode
 }
 
 type AnalysisResult struct {
@@ -27,12 +30,21 @@ type AnalysisResult struct {
 }
 
 type CryptoUsage struct {
-	Package        string `json:"package"`
-	Function       string `json:"function"`
-	CallerFunc     string `json:"caller_function"`
-	CallSite       string `json:"call_site"`
-	PackagePath    string `json:"package_path"`
-	FIPSCompliance string `json:"fips_compliant"`
+	Package        string     `json:"package"`
+	Function       string     `json:"function"`
+	CallerFunc     string     `json:"caller_function"`
+	CallSite       string     `json:"call_site"`
+	PackagePath    string     `json:"package_path"`
+	FIPSCompliance string     `json:"fips_compliant"`
+	CallTree       []CallNode `json:"call_tree"`
+	// field to store the call graph node for efficient batch processing
+	callerNode *callgraph.Node `json:"-"`
+}
+
+type CallNode struct {
+	Function    string `json:"function"`
+	Package     string `json:"package"`
+	PackagePath string `json:"package_path"`
 }
 
 type AnalysisSummary struct {
@@ -182,6 +194,8 @@ func (a *CryptoAnalyzer) findCryptoUsages(cg *callgraph.Graph) []CryptoUsage {
 					CallSite:       edge.Description(),
 					PackagePath:    packagePath,
 					FIPSCompliance: fipsStatus,
+					CallTree:       []CallNode{},
+					callerNode:     node,
 				}
 				usages = append(usages, usage)
 
@@ -198,6 +212,10 @@ func (a *CryptoAnalyzer) findCryptoUsages(cg *callgraph.Graph) []CryptoUsage {
 		}
 		return usages[i].Package < usages[j].Package
 	})
+
+	if a.CallTree {
+		a.buildCallTreesBatch(cg, usages)
+	}
 
 	return usages
 }
@@ -238,4 +256,99 @@ func calculateSummary(usages []CryptoUsage) AnalysisSummary {
 	summary.FIPSCompliant = summary.RejectedUsages == 0 && summary.MustEvaluateUsages == 0 && summary.UnknownUsages == 0
 
 	return summary
+}
+
+func (a *CryptoAnalyzer) buildCallTreesBatch(cg *callgraph.Graph, usages []CryptoUsage) {
+	nodeToUsageIndices := make(map[*callgraph.Node][]int)
+
+	for i := range usages {
+		if usages[i].callerNode != nil {
+			nodeToUsageIndices[usages[i].callerNode] = append(nodeToUsageIndices[usages[i].callerNode], i)
+		}
+	}
+
+	for node, indices := range nodeToUsageIndices {
+		callTree := a.buildCallTree(cg, node)
+		for _, idx := range indices {
+			usages[idx].CallTree = callTree
+		}
+	}
+}
+
+func (a *CryptoAnalyzer) buildCallTree(cg *callgraph.Graph, targetNode *callgraph.Node) []CallNode {
+	if a.pathCache == nil {
+		a.pathCache = make(map[*callgraph.Node][]CallNode)
+	}
+
+	if cached, exists := a.pathCache[targetNode]; exists {
+		return cached
+	}
+
+	path := a.findShortestPathBFS(cg, targetNode)
+
+	var callTree []CallNode
+	for _, node := range path {
+		if node.Func != nil && node.Func.Pkg != nil {
+			funcName := node.Func.String()
+			pkgPath := node.Func.Pkg.Pkg.Path()
+			pkgName := node.Func.Pkg.Pkg.Name()
+
+			callNode := CallNode{
+				Function:    funcName,
+				Package:     pkgName,
+				PackagePath: pkgPath,
+			}
+			callTree = append(callTree, callNode)
+		}
+	}
+
+	a.pathCache[targetNode] = callTree
+	return callTree
+}
+
+func (a *CryptoAnalyzer) findShortestPathBFS(cg *callgraph.Graph, targetNode *callgraph.Node) []*callgraph.Node {
+	type queueItem struct {
+		node *callgraph.Node
+		path []*callgraph.Node
+	}
+
+	visited := make(map[*callgraph.Node]bool)
+	queue := []queueItem{{targetNode, []*callgraph.Node{targetNode}}}
+	visited[targetNode] = true
+
+	for len(queue) > 0 && len(queue[0].path) <= a.CallTreeDepth {
+		current := queue[0]
+		queue = queue[1:]
+
+		// If this node has no incoming edges or is a main function, it's a root
+		if len(current.node.In) == 0 || a.isMainFunction(current.node) {
+			// Reverse the path since we built it backwards
+			result := make([]*callgraph.Node, len(current.path))
+			for i, node := range current.path {
+				result[len(current.path)-1-i] = node
+			}
+			return result
+		}
+
+		for _, edge := range current.node.In {
+			if edge.Caller != nil && !visited[edge.Caller] {
+				visited[edge.Caller] = true
+				newPath := make([]*callgraph.Node, len(current.path)+1)
+				copy(newPath[1:], current.path)
+				newPath[0] = edge.Caller
+				queue = append(queue, queueItem{edge.Caller, newPath})
+			}
+		}
+	}
+
+	return []*callgraph.Node{targetNode}
+}
+
+func (a *CryptoAnalyzer) isMainFunction(node *callgraph.Node) bool {
+	if node.Func == nil {
+		return false
+	}
+
+	funcName := node.Func.Name()
+	return funcName == "main" || funcName == "init"
 }
