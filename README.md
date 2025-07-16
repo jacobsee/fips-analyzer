@@ -31,7 +31,7 @@ Analyze all packages in a directory:
 
 ### Specify File Patterns
 
-Build the syntax free from only files matching certain patterns (comma-separated):
+Build the syntax tree from only files matching certain patterns (comma-separated):
 
 ```bash
 ./fips-analyzer -source /path/to/source/code -patterns main.go,foo.go
@@ -68,7 +68,7 @@ Export results to a JSON file:
 ```
 
 > [!NOTE]  
-> The JSON output can be dropped onto the [report visualizer](report-visualizer.html) (just open the static html in a browser) for interactive exploration.
+> The JSON output can be dropped onto the [report visualizer](report-visualizer.html) (just open the static html in a browser) for interactive exploration. **You can click on any node in a call graph to filter to only call graphs which include that package.**
 
 ### Verbose Output
 
