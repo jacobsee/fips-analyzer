@@ -37,6 +37,14 @@
       font-size: 1.1em;
       color: #34495e;
       margin-bottom: 0.5em;
+      position: sticky;
+      top: 0;
+      background: #fff;
+      z-index: 2;
+      box-shadow: 0 2px 8px rgba(44,62,80,0.04);
+      padding-top: 0.3em;
+      padding-bottom: 0.3em;
+      transition: box-shadow 0.2s;
     }
     ul { margin: 0.5em 0 0 1em; }
     li { margin-bottom: 0.5em; }
@@ -57,10 +65,35 @@
       font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
       color: #555;
       line-height: 1.4;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4em;
+      word-break: break-all;
+      max-width: 100%;
+    }
+    .call-label {
+      background: #e3eafc;
+      color: #2c3e50;
+      border-radius: 4px;
+      padding: 0.15em 0.5em;
+      margin: 0 0.1em;
+      font-size: 0.95em;
+      box-shadow: 0 1px 2px rgba(44,62,80,0.04);
+      display: inline-block;
+      word-break: break-all;
+      transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+      cursor: pointer;
+    }
+    .call-tree:hover {
+      background: rgb(245, 245, 245);
+      color: #1a2a3a;
+      box-shadow: 0 2px 8px rgba(44,62,80,0.10);
     }
     .call-arrow {
       color: #3498db;
-      margin: 0 0.5em;
+      margin: 0 0.2em;
+      font-weight: bold;
+      align-self: center;
     }
   </style>
 </head>
@@ -143,7 +176,7 @@
                 if (index > 0) {
                   html += `<span class=\"call-arrow\">→</span>`;
                 }
-                html += `<span title=\"Package: ${node.package_path}\">${node.function}</span>`;
+                html += `<span class=\"call-label\" title=\"Package: ${node.package_path}\">${node.function}</span>`;
               });
               
               html += `</div></div>`;

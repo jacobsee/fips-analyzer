@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"golang.org/x/tools/go/callgraph"
-	"golang.org/x/tools/go/callgraph/rta"
+	"golang.org/x/tools/go/callgraph/vta"
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/ssa"
 	"golang.org/x/tools/go/ssa/ssautil"
@@ -100,42 +100,7 @@ func (a *CryptoAnalyzer) Analyze() (*AnalysisResult, error) {
 		fmt.Printf("Built SSA program\n")
 	}
 
-	var roots []*ssa.Function
-
-	for _, pkg := range ssaProg.AllPackages() {
-		// Add main function(s)
-		if pkg.Pkg.Name() == "main" {
-			if main := pkg.Func("main"); main != nil {
-				roots = append(roots, main)
-				if a.Verbose {
-					fmt.Printf("Added main function as root: %s\n", main.String())
-				}
-			}
-		}
-
-		if a.InitAll {
-			// Add init functions from all packages
-			if init := pkg.Func("init"); init != nil {
-				roots = append(roots, init)
-				if a.Verbose {
-					fmt.Printf("Added init function as root: %s\n", init.String())
-				}
-			}
-		}
-	}
-
-	if a.Verbose {
-		fmt.Printf("Found %d entry points for RTA analysis\n", len(roots))
-	}
-
-	// If no suitable entry points found, we can't use RTA algorithm, and I don't want to get into fallbacks
-	if len(roots) == 0 {
-		return nil, fmt.Errorf("no suitable entry points found for RTA analysis")
-	}
-
-	var cg *callgraph.Graph
-	rtaResult := rta.Analyze(roots, true)
-	cg = rtaResult.CallGraph
+	cg := vta.CallGraph(ssautil.AllFunctions(ssaProg), nil)
 
 	if a.Verbose {
 		fmt.Printf("Built call graph with %d nodes\n", len(cg.Nodes))
