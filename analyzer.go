@@ -6,8 +6,9 @@ import (
 	"strings"
 
 	"golang.org/x/tools/go/callgraph"
-	"golang.org/x/tools/go/callgraph/cha"
+	"golang.org/x/tools/go/callgraph/rta"
 	"golang.org/x/tools/go/packages"
+	"golang.org/x/tools/go/ssa"
 	"golang.org/x/tools/go/ssa/ssautil"
 )
 
@@ -16,10 +17,9 @@ type CryptoAnalyzer struct {
 	EntryPoint     string
 	Verbose        bool
 	UnapprovedOnly bool
-	Denoise        bool
+	InitAll        bool
 	CallTree       bool
 	CallTreeDepth  int
-	pathCache map[*callgraph.Node][]CallNode
 }
 
 type AnalysisResult struct {
@@ -93,14 +93,49 @@ func (a *CryptoAnalyzer) Analyze() (*AnalysisResult, error) {
 		fmt.Printf("Loaded %d packages\n", len(pkgs))
 	}
 
-	ssaProg, _ := ssautil.AllPackages(pkgs, 0)
+	ssaProg, _ := ssautil.AllPackages(pkgs, ssa.InstantiateGenerics)
 	ssaProg.Build()
 
 	if a.Verbose {
 		fmt.Printf("Built SSA program\n")
 	}
 
-	cg := cha.CallGraph(ssaProg)
+	var roots []*ssa.Function
+
+	for _, pkg := range ssaProg.AllPackages() {
+		// Add main function(s)
+		if pkg.Pkg.Name() == "main" {
+			if main := pkg.Func("main"); main != nil {
+				roots = append(roots, main)
+				if a.Verbose {
+					fmt.Printf("Added main function as root: %s\n", main.String())
+				}
+			}
+		}
+
+		if a.InitAll {
+			// Add init functions from all packages
+			if init := pkg.Func("init"); init != nil {
+				roots = append(roots, init)
+				if a.Verbose {
+					fmt.Printf("Added init function as root: %s\n", init.String())
+				}
+			}
+		}
+	}
+
+	if a.Verbose {
+		fmt.Printf("Found %d entry points for RTA analysis\n", len(roots))
+	}
+
+	// If no suitable entry points found, we can't use RTA algorithm, and I don't want to get into fallbacks
+	if len(roots) == 0 {
+		return nil, fmt.Errorf("no suitable entry points found for RTA analysis")
+	}
+
+	var cg *callgraph.Graph
+	rtaResult := rta.Analyze(roots, true)
+	cg = rtaResult.CallGraph
 
 	if a.Verbose {
 		fmt.Printf("Built call graph with %d nodes\n", len(cg.Nodes))
@@ -112,16 +147,6 @@ func (a *CryptoAnalyzer) Analyze() (*AnalysisResult, error) {
 		filtered := []CryptoUsage{}
 		for _, usage := range usages {
 			if usage.FIPSCompliance != "approved" {
-				filtered = append(filtered, usage)
-			}
-		}
-		usages = filtered
-	}
-
-	if a.Denoise {
-		filtered := []CryptoUsage{}
-		for _, usage := range usages {
-			if !isFilteredPackage(usage.PackagePath) {
 				filtered = append(filtered, usage)
 			}
 		}
@@ -214,25 +239,10 @@ func (a *CryptoAnalyzer) findCryptoUsages(cg *callgraph.Graph) []CryptoUsage {
 	})
 
 	if a.CallTree {
-		a.buildCallTreesBatch(cg, usages)
+		a.buildCallTreesBatch(usages)
 	}
 
 	return usages
-}
-
-func isFilteredPackage(pkgPath string) bool {
-	return strings.HasPrefix(pkgPath, "runtime") ||
-		strings.HasPrefix(pkgPath, "internal/") ||
-		strings.HasPrefix(pkgPath, "crypto") ||
-		strings.HasPrefix(pkgPath, "encoding/") ||
-		strings.HasPrefix(pkgPath, "fmt") ||
-		strings.HasPrefix(pkgPath, "io") ||
-		strings.HasPrefix(pkgPath, "log") ||
-		strings.HasPrefix(pkgPath, "strings") ||
-		strings.HasPrefix(pkgPath, "bytes") ||
-		strings.HasPrefix(pkgPath, "sync") ||
-		strings.HasPrefix(pkgPath, "time") ||
-		strings.HasPrefix(pkgPath, "golang.org/x/crypto")
 }
 
 func calculateSummary(usages []CryptoUsage) AnalysisSummary {
@@ -258,33 +268,17 @@ func calculateSummary(usages []CryptoUsage) AnalysisSummary {
 	return summary
 }
 
-func (a *CryptoAnalyzer) buildCallTreesBatch(cg *callgraph.Graph, usages []CryptoUsage) {
-	nodeToUsageIndices := make(map[*callgraph.Node][]int)
-
+func (a *CryptoAnalyzer) buildCallTreesBatch(usages []CryptoUsage) {
+	// Build call tree for each usage individually
 	for i := range usages {
 		if usages[i].callerNode != nil {
-			nodeToUsageIndices[usages[i].callerNode] = append(nodeToUsageIndices[usages[i].callerNode], i)
-		}
-	}
-
-	for node, indices := range nodeToUsageIndices {
-		callTree := a.buildCallTree(cg, node)
-		for _, idx := range indices {
-			usages[idx].CallTree = callTree
+			usages[i].CallTree = a.buildCallTree(usages[i].callerNode)
 		}
 	}
 }
 
-func (a *CryptoAnalyzer) buildCallTree(cg *callgraph.Graph, targetNode *callgraph.Node) []CallNode {
-	if a.pathCache == nil {
-		a.pathCache = make(map[*callgraph.Node][]CallNode)
-	}
-
-	if cached, exists := a.pathCache[targetNode]; exists {
-		return cached
-	}
-
-	path := a.findShortestPathBFS(cg, targetNode)
+func (a *CryptoAnalyzer) buildCallTree(targetNode *callgraph.Node) []CallNode {
+	path := a.findShortestPathFromRoot(targetNode)
 
 	var callTree []CallNode
 	for _, node := range path {
@@ -302,11 +296,10 @@ func (a *CryptoAnalyzer) buildCallTree(cg *callgraph.Graph, targetNode *callgrap
 		}
 	}
 
-	a.pathCache[targetNode] = callTree
 	return callTree
 }
 
-func (a *CryptoAnalyzer) findShortestPathBFS(cg *callgraph.Graph, targetNode *callgraph.Node) []*callgraph.Node {
+func (a *CryptoAnalyzer) findShortestPathFromRoot(targetNode *callgraph.Node) []*callgraph.Node {
 	type queueItem struct {
 		node *callgraph.Node
 		path []*callgraph.Node
@@ -320,14 +313,16 @@ func (a *CryptoAnalyzer) findShortestPathBFS(cg *callgraph.Graph, targetNode *ca
 		current := queue[0]
 		queue = queue[1:]
 
-		// If this node has no incoming edges or is a main function, it's a root
-		if len(current.node.In) == 0 || a.isMainFunction(current.node) {
-			// Reverse the path since we built it backwards
-			result := make([]*callgraph.Node, len(current.path))
-			for i, node := range current.path {
-				result[len(current.path)-1-i] = node
+		if len(current.node.In) == 0 {
+			return current.path
+		}
+
+		if current.node.Func != nil && current.node.Func.Pkg != nil {
+			pkgName := current.node.Func.Pkg.Pkg.Name()
+			funcName := current.node.Func.Name()
+			if (funcName == "init" || funcName == "main") && pkgName == "main" {
+				return current.path
 			}
-			return result
 		}
 
 		for _, edge := range current.node.In {
@@ -342,13 +337,4 @@ func (a *CryptoAnalyzer) findShortestPathBFS(cg *callgraph.Graph, targetNode *ca
 	}
 
 	return []*callgraph.Node{targetNode}
-}
-
-func (a *CryptoAnalyzer) isMainFunction(node *callgraph.Node) bool {
-	if node.Func == nil {
-		return false
-	}
-
-	funcName := node.Func.Name()
-	return funcName == "main" || funcName == "init"
 }

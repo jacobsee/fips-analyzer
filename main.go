@@ -13,11 +13,11 @@ func main() {
 		sourceDir      = flag.String("source", "", "Source code directory to analyze")
 		entryPoint     = flag.String("entry", "", "Entry point (main package or specific package)")
 		outputFile     = flag.String("output", "", "Output file for results (JSON format)")
-		verbose        = flag.Bool("verbose", false, "Enable verbose output")
-		unapprovedOnly = flag.Bool("unapproved-only", false, "Show only unapproved usages")
-		denoise        = flag.Bool("denoise", false, "Attempt to filter out calls made by runtime or standard library packages, or within internal crypto packages")
-		callTree       = flag.Bool("call-tree", false, "Include call tree in output (significant increase in computation time)")
-		callTreeDepth  = flag.Int("call-tree-depth", 5, "Maximum depth for call tree analysis (default: 5, lower values improve performance)")
+		verbose        = flag.Bool("verbose", false, "Enable verbose output (default: false)")
+		unapprovedOnly = flag.Bool("unapproved-only", false, "Show only unapproved usages (default: false)")
+		initAll        = flag.Bool("init-all", true, "Include all discovered init functions in the analysis (default: true)")
+		callTree       = flag.Bool("call-tree", false, "Include call tree in output (increases computation time, default: false)")
+		callTreeDepth  = flag.Int("call-tree-depth", 10, "Maximum depth for call tree analysis (default: 10, lower values improve performance)")
 	)
 	flag.Parse()
 
@@ -32,7 +32,7 @@ func main() {
 		EntryPoint:     *entryPoint,
 		Verbose:        *verbose,
 		UnapprovedOnly: *unapprovedOnly,
-		Denoise:        *denoise,
+		InitAll:        *initAll,
 		CallTree:       *callTree,
 		CallTreeDepth:  *callTreeDepth,
 	}
@@ -106,28 +106,28 @@ func printResults(result *AnalysisResult, verbose bool) {
 			if len(approved) > 0 {
 				fmt.Printf("\n✅ FIPS Approved Algorithms:\n")
 				for _, usage := range approved {
-					printUsage(usage, verbose)
+					printUsage(usage)
 				}
 			}
 
 			if len(rejected) > 0 {
 				fmt.Printf("\n❌ Rejected Algorithms:\n")
 				for _, usage := range rejected {
-					printUsage(usage, verbose)
+					printUsage(usage)
 				}
 			}
 
 			if len(mustEvaluate) > 0 {
 				fmt.Printf("\n🔍 Must Evaluate Manually:\n")
 				for _, usage := range mustEvaluate {
-					printUsage(usage, verbose)
+					printUsage(usage)
 				}
 			}
 
 			if len(unknown) > 0 {
 				fmt.Printf("\n❓ Unknown x/crypto Packages:\n")
 				for _, usage := range unknown {
-					printUsage(usage, verbose)
+					printUsage(usage)
 				}
 			}
 		} else {

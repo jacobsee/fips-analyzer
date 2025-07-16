@@ -37,17 +37,6 @@ Analyze starting from a specific entry point:
 ./fips-analyzer -source /path/to/source/code -entry ./main.go
 ```
 
-### Denoise
-
-Attempt to filter out internal crypto function calls, standard library crypto calls, and runtime crypto calls:
-
-```bash
-./fips-analyzer -source /path/to/source/code -denoise
-```
-
-> [!IMPORTANT]  
-> This is intended to make a first pass analysis easier to read, as one legitimate crypto function call from your code may balloon into tens of internal calls to functions in the crypto module, all of which would otherwise be recorded in the output. It should be interpreted as a list of calls to check _first_, but always run another check with denoise **off** to ensure that nothing else is lurking.
-
 ### Include Only Non-FIPS Compliant Algorithms
 
 Filter to only unapproved (incl. unknown and must-evaluate) algorithms:
