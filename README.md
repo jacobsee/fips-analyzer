@@ -1,6 +1,6 @@
-# Go x/crypto FIPS compliance analysis tool
+# Go x/crypto usage analysis tool
 
-A CLI tool (and HTML viewer) for analyzing Go projects using `callgraph` to detect the usage of cryptographic algorithms from `golang.org/x/crypto` and determining their FIPS 140-2 compliance status.
+A CLI tool (and HTML viewer) for analyzing Go projects using `callgraph` to detect the usage of cryptographic algorithms from `golang.org/x/crypto`.
 
 ![screenshot](screenshot.png)
 
@@ -29,31 +29,34 @@ Analyze all packages in a directory:
 ./fips-analyzer -source /path/to/source/code
 ```
 
-### With Entry Point
+### Specify File Patterns
 
-Analyze starting from a specific entry point:
+Build the syntax free from only files matching certain patterns (comma-separated):
 
 ```bash
-./fips-analyzer -source /path/to/source/code -entry ./main.go
+./fips-analyzer -source /path/to/source/code -patterns main.go,foo.go
 ```
 
-### Denoise
+### Control Init Function Analysis
 
-Attempt to filter out internal crypto function calls, standard library crypto calls, and runtime crypto calls:
+By default, all discovered `init` functions are loaded into the call graph. You can disable this with:
 
 ```bash
-./fips-analyzer -source /path/to/source/code -denoise
+./fips-analyzer -source /path/to/source/code -init-all=false
 ```
 
-> [!IMPORTANT]  
-> This is intended to make a first pass analysis easier to read, as one legitimate crypto function call from your code may balloon into tens of internal calls to functions in the crypto module, all of which would otherwise be recorded in the output. It should be interpreted as a list of calls to check _first_, but always run another check with denoise **off** to ensure that nothing else is lurking.
+### Include Call Tree Information
 
-### Include Only Non-FIPS Compliant Algorithms
-
-Filter to only unapproved (incl. unknown and must-evaluate) algorithms:
+To include call tree information in the output (may increase computation time):
 
 ```bash
-./fips-analyzer -source /path/to/source/code -unapproved-only
+./fips-analyzer -source /path/to/source/code -call-tree
+```
+
+You can also control the maximum call tree depth (default: 10):
+
+```bash
+./fips-analyzer -source /path/to/source/code -call-tree -call-tree-depth 5
 ```
 
 ### JSON Output
@@ -65,7 +68,7 @@ Export results to a JSON file:
 ```
 
 > [!NOTE]  
-> The JSON output can be dropped onto the [report visualizer](report-visualizer.html) (just open the static html in a browser) to make things nice and pleasant and colorful.
+> The JSON output can be dropped onto the [report visualizer](report-visualizer.html) (just open the static html in a browser) for interactive exploration.
 
 ### Verbose Output
 
