@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>x/crypto FIPS Compliance Report Visualizer</title>
+  <title>x/crypto Call Report Visualizer</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body { font-family: Arial, sans-serif; margin: 2em; background: #f7f7f7; }
@@ -17,22 +17,12 @@
       cursor: pointer;
     }
     .group {
-      margin-bottom: 2em;
+      margin-bottom: 0.8em;
       background: #fff;
-      border-radius: 8px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-      padding: 1em;
+      border-radius: 6px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+      padding: 0.7em 0.8em 0.5em 0.8em;
     }
-    .fips-status {
-      font-weight: bold;
-      padding: 0.2em 0.6em;
-      border-radius: 4px;
-      margin-right: 1em;
-    }
-    .approved { background: #27ae60; color: #fff; }
-    .unapproved { background: #e74c3c; color: #fff; }
-    .must_evaluate_manually { background: #ac12f3; color: #fff; }
-    .unknown { background: #f1c40f; color: #fff; }
     .module {
       font-size: 1.1em;
       color: #34495e;
@@ -95,15 +85,51 @@
       font-weight: bold;
       align-self: center;
     }
+    .filter-btn {
+      background-color: #3498db;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      padding: 0.35em 1.1em;
+      font-size: 1em;
+      font-weight: 600;
+      box-shadow: 0 1px 4px rgba(44,62,80,0.08);
+      cursor: pointer;
+      transition: background 0.18s, box-shadow 0.18s;
+      outline: none;
+    }
+    .filter-btn:hover, .filter-btn:focus {
+      background: #217dbb;
+      box-shadow: 0 2px 8px rgba(44,62,80,0.13);
+    }
+    .filter-indicator-active {
+      background: #e3f1fc;
+      border: 2px solid #3498db;
+      color: #1a2a3a;
+      border-radius: 6px;
+      padding: 0.7em 1.2em;
+      margin-bottom: 1.2em;
+      font-size: 1.08em;
+      box-shadow: 0 2px 8px rgba(44,62,80,0.07);
+      display: flex;
+      align-items: center;
+      gap: 0.7em;
+    }
   </style>
 </head>
 <body>
-  <h1>x/crypto FIPS Compliance Report Visualizer</h1>
+  <h1>x/crypto Call Report Visualizer</h1>
   <div id="drop-zone">Drop your report JSON file here</div>
+  <div id="file-name"></div>
+  <div id="filter-indicator" style="display:none;"></div>
   <div id="visualization"></div>
   <script>
     const dropZone = document.getElementById('drop-zone');
     const viz = document.getElementById('visualization');
+    const filterIndicator = document.getElementById('filter-indicator');
+    const fileNameDiv = document.getElementById('file-name');
+    let currentData = null;
+    let currentFilter = null;
 
     dropZone.addEventListener('dragover', e => {
       e.preventDefault();
@@ -121,13 +147,13 @@
         reader.onload = function(evt) {
           try {
             const data = JSON.parse(evt.target.result);
+            currentData = data;
+            currentFilter = null;
             visualizeReport(data);
             dropZone.style.display = 'none';
-            const fileNameDiv = document.createElement('div');
-            fileNameDiv.id = 'file-name';
-            fileNameDiv.style = 'margin-bottom:2em;font-weight:bold;color:#2980b9;';
+            fileNameDiv.style = 'margin-bottom:0.5em;font-weight:bold;color:#2980b9;';
             fileNameDiv.textContent = `Loaded file: ${file.name}`;
-            dropZone.parentNode.insertBefore(fileNameDiv, viz);
+            fileNameDiv.parentNode.insertBefore(filterIndicator, fileNameDiv.nextSibling);
           } catch (err) {
             viz.innerHTML = '<div style="color:red">Invalid JSON file.</div>';
           }
@@ -138,57 +164,100 @@
       }
     });
 
-    function visualizeReport(data) {
-      // Group usages by FIPS status and crypto module
+    function visualizeReport(data, filterPackagePath = null) {
+      // Group usages by crypto module
       if (!data.detected_usages || !Array.isArray(data.detected_usages)) {
         viz.innerHTML = '<div style="color:red">No detected_usages found in report.</div>';
         return;
       }
+      let usages = data.detected_usages;
+      if (filterPackagePath) {
+        usages = usages.filter(d => Array.isArray(d.call_tree) && d.call_tree.some(node => node.package_path === filterPackagePath));
+      }
       const groups = {};
-      data.detected_usages.forEach(d => {
-        const status = d.fips_compliant || 'unknown';
+      usages.forEach(d => {
         const module = d.package || 'unknown';
-        if (!groups[status]) groups[status] = {};
-        if (!groups[status][module]) groups[status][module] = [];
-        groups[status][module].push(d);
+        if (!groups[module]) groups[module] = [];
+        groups[module].push(d);
       });
       let html = '';
-      Object.entries(groups).forEach(([status, modules]) => {
-        let statusClass;
-        if (status === 'approved') statusClass = 'approved';
-        else if (status === 'rejected') statusClass = 'unapproved';
-        else if (status === 'must_evaluate_manually') statusClass = 'must_evaluate_manually';
-        else statusClass = 'unknown';
-        html += `<div class=\"group\"><span class=\"fips-status ${statusClass}\">${status.toUpperCase()}</span>`;
-        Object.entries(modules).forEach(([module, usages], idx) => {
-          const moduleId = `module-${status}-${idx}`;
-          html += `<div class=\"module\" style=\"cursor:pointer;\" onclick=\"toggleModule('${moduleId}')\">▶ Module: <b>${module}</b> (${usages.length} usage${usages.length !== 1 ? 's' : ''})</div>`;
-          html += `<div id=\"${moduleId}\" class=\"module-content\" style=\"display:none;\"><ul>`;
-          usages.forEach(d => {
-            html += `<li><b>${d.function}</b> called by <b>${d.caller_function}</b> <span style=\"color:#888\">(${d.call_site}, ${d.package_path})</span>`;
-            
-            if (d.call_tree && Array.isArray(d.call_tree) && d.call_tree.length > 0) {
-              html += `<div class=\"call-tree\">`;
-              html += `<div class=\"call-tree-header\">Call Path (${d.call_tree.length} step${d.call_tree.length !== 1 ? 's' : ''}):</div>`;
-              html += `<div class=\"call-path\">`;
-              
-              d.call_tree.forEach((node, index) => {
-                if (index > 0) {
-                  html += `<span class=\"call-arrow\">→</span>`;
-                }
-                html += `<span class=\"call-label\" title=\"Package: ${node.package_path}\">${node.function}</span>`;
-              });
-              
-              html += `</div></div>`;
-            }
-            
-            html += `</li>`;
-          });
-          html += '</ul></div>';
+      Object.entries(groups).forEach(([module, usages], idx) => {
+        const moduleId = `module-${idx}`;
+        html += `<div class=\"group\">`;
+        html += `<div class=\"module\" style=\"cursor:pointer;\" onclick=\"toggleModule('${moduleId}')\">▶ Module: <b>${module}</b> (${usages.length} usage${usages.length !== 1 ? 's' : ''})</div>`;
+        html += `<div id=\"${moduleId}\" class=\"module-content\" style=\"display:none;\"><ul>`;
+        usages.forEach(d => {
+          html += `<li><b>${d.function}</b> called by <b>${d.caller_function}</b> <span style=\"color:#888\">(${d.call_site}, ${d.package_path})</span>`;
+          if (d.call_tree && Array.isArray(d.call_tree) && d.call_tree.length > 0) {
+            html += `<div class=\"call-tree\">`;
+            html += `<div class=\"call-tree-header\">Call Path (${d.call_tree.length} step${d.call_tree.length !== 1 ? 's' : ''}):</div>`;
+            html += `<div class=\"call-path\">`;
+            d.call_tree.forEach((node, index) => {
+              if (index > 0) {
+                html += `<span class=\"call-arrow\">→</span>`;
+              }
+              html += `<span class=\"call-label\" title=\"Package: ${node.package_path}\" data-package=\"${node.package_path}\">${node.function}</span>`;
+            });
+            html += `</div></div>`;
+          }
+          html += `</li>`;
         });
+        html += '</ul></div>';
         html += '</div>';
       });
       viz.innerHTML = html;
+      // Add click listeners for call-labels
+      document.querySelectorAll('.call-label').forEach(el => {
+        el.addEventListener('click', function(e) {
+          e.stopPropagation();
+          removeDropdowns();
+          const pkg = this.getAttribute('data-package');
+          const rect = this.getBoundingClientRect();
+          const dropdown = document.createElement('div');
+          dropdown.className = 'call-label-dropdown';
+          dropdown.style.position = 'absolute';
+          dropdown.style.left = `${rect.left + window.scrollX}px`;
+          dropdown.style.top = `${rect.bottom + window.scrollY}px`;
+          dropdown.style.background = '#fff';
+          dropdown.style.border = '1px solid #bbb';
+          dropdown.style.borderRadius = '4px';
+          dropdown.style.boxShadow = '0 2px 8px rgba(44,62,80,0.10)';
+          dropdown.style.padding = '0.5em 1em';
+          dropdown.style.zIndex = 1000;
+          dropdown.innerHTML = `<button class='filter-btn' data-filter-package='${pkg}'>Filter by this package</button>`;
+          document.body.appendChild(dropdown);
+          dropdown.querySelector('button').addEventListener('click', function(ev) {
+            ev.stopPropagation();
+            currentFilter = pkg;
+            visualizeReport(currentData, pkg);
+            showFilterIndicator(pkg);
+            removeDropdowns();
+          });
+          // Remove dropdown on click elsewhere
+          setTimeout(() => {
+            document.addEventListener('click', removeDropdowns, { once: true });
+          }, 0);
+        });
+      });
+    }
+
+    function removeDropdowns() {
+      document.querySelectorAll('.call-label-dropdown').forEach(el => el.remove());
+    }
+
+    function showFilterIndicator(pkg) {
+      filterIndicator.style.display = 'block';
+      filterIndicator.innerHTML = `
+        <span style="font-weight:bold;vertical-align:middle;">FILTER ACTIVE:</span>
+        <span style="vertical-align:middle;">Showing only call paths through the package <span style='font-family:monospace;font-size:1.05em;background:#e3eafc;padding:0.1em 0.4em;border-radius:4px;'>${pkg}</span></span>
+        <button id='clear-filter' class='filter-btn' style='margin-left:1em;'>Clear filter</button>
+      `;
+      filterIndicator.className = 'filter-indicator-active';
+      document.getElementById('clear-filter').onclick = function() {
+        currentFilter = null;
+        visualizeReport(currentData);
+        filterIndicator.style.display = 'none';
+      };
     }
 
     // Collapsing stuff
